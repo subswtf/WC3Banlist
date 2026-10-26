@@ -53,13 +53,48 @@ SCREEN_W, SCREEN_H = pyautogui.size()
 SX, SY = SCREEN_W / BASE_WIDTH, SCREEN_H / BASE_HEIGHT
 REGIONS = [(int(a * SX), int(b * SY), int(c * SX), int(d * SY)) for a, b, c, d in BASE_REGIONS]
 
-def add_row(banlist, row):
-    if not row or row[0] is None:
-        return
-    name = str(row[0]).strip().lower()
-    reason = str(row[1]).strip() if len(row) > 1 and row[1] is not None else ''
-    if name:
-        banlist[name] = reason
+TICKED = {'true', 'yes', 'y', 'x', '1', '\u2713', '\u2714'}
+
+# Turn sheet rows (first row = headers) into {name: (reason, 'ban' or 'warn')}
+# Columns are found by header name, so their order doesn't matter:
+#   Player (or Name), Reason, Banned, Warning - other columns (Date, Admin...) are ignored.
+# If there are no Banned/Warning columns, every listed player is banned.
+def parse_rows(rows):
+    rows = list(rows)
+    if not rows:
+        return {}
+    headers = [str(h).strip().lower() if h is not None else '' for h in rows[0]]
+    def col(*names):
+        for n in names:
+            if n in headers:
+                return headers.index(n)
+        return None
+    name_c = col('player', 'name')
+    name_c = 0 if name_c is None else name_c
+    reason_c, ban_c, warn_c = col('reason'), col('banned', 'ban'), col('warning', 'warn')
+    if reason_c is None and ban_c is None and warn_c is None and len(headers) > 1:
+        reason_c = 1
+    def cell(row, c):
+        return str(row[c]).strip() if c is not None and c < len(row) and row[c] is not None else ''
+    banlist = {}
+    for row in rows[1:]:
+        if not row:
+            continue
+        name = cell(row, name_c).lower()
+        if not name:
+            continue
+        if ban_c is None and warn_c is None:
+            status = 'ban'
+        elif cell(row, ban_c).lower() in TICKED:
+            status = 'ban'
+        elif cell(row, warn_c).lower() in TICKED:
+            status = 'warn'
+        else:
+            continue
+        # a ban always wins over a warning if the same name is listed twice
+        if banlist.get(name, ('', ''))[1] != 'ban':
+            banlist[name] = (cell(row, reason_c), status)
+    return banlist
 
 # Load Banlist from the Google Sheet (as CSV)
 def load_banlist_from_sheet():
@@ -78,10 +113,9 @@ def load_banlist_from_sheet():
     if text.lstrip().lower().startswith('<!doctype html') or text.lstrip().startswith('<html'):
         print("Google returned a sign-in page - share the sheet as 'Anyone with the link - Viewer'.")
         return None
-    banlist = {}
-    for row in list(csv.reader(io.StringIO(text)))[1:]:
-        add_row(banlist, row)
-    print(f"Loaded {len(banlist)} names from the Google Sheet.")
+    banlist = parse_rows(csv.reader(io.StringIO(text)))
+    bans = sum(1 for r, st in banlist.values() if st == 'ban')
+    print(f"Loaded {bans} bans and {len(banlist) - bans} warnings from the Google Sheet.")
     return banlist
 
 # Load Banlist from the Google Sheet, or the Excel file as a fallback
@@ -97,12 +131,7 @@ def load_banlist():
 
     wb = openpyxl.load_workbook(banlist_path)
     ws = wb.active
-    banlist = {}
-
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        add_row(banlist, row)
-
-    return banlist
+    return parse_rows(ws.iter_rows(values_only=True))
 
 def preprocess_image(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -124,7 +153,8 @@ def check_banned(players, banlist):
             fuzzy = (len(player_lower) >= FUZZY_MIN_LENGTH and len(banned_player) >= FUZZY_MIN_LENGTH
                      and difflib.SequenceMatcher(None, player_lower, banned_player).ratio() >= FUZZY_RATIO)
             if exact or fuzzy:
-                banned_players.append((player, banlist[banned_player]))
+                reason, status = banlist[banned_player]
+                banned_players.append((player, reason, status))
                 break
     return banned_players
 
@@ -143,7 +173,9 @@ def extract_players_with_positions():
     return players
 
 def click_banned_players(banned_players):
-    for player, reason in banned_players:
+    for player, reason, status in banned_players:
+        if status != 'ban':
+            continue
         x, y = player['x'], player['y']
         x_right = x + int(BASE_NAME_CLICK[0] * SX)
         y_below = y + int(BASE_NAME_CLICK[1] * SY)
@@ -174,20 +206,29 @@ def handle_f3():
         time.sleep(.1)
         keyboard.send('enter')
         time.sleep(.1)
-    keyboard.write("Players banned:")
-    time.sleep(.1)
-    keyboard.send('enter')
-    time.sleep(.1)
+    matches = check_banned(players_with_positions, load_banlist())
+    bans = [m for m in matches if m[2] == 'ban']
+    warnings = [m for m in matches if m[2] == 'warn']
 
-    banned_from_list = check_banned(players_with_positions, load_banlist())
-    for player, reason in banned_from_list:
-        keyboard.write(f"{player['text']} - Reason: {reason}")
+    def say(line):
+        keyboard.write(line)
         time.sleep(.1)
         keyboard.send('enter')
-        print(f"{player['text']} - Reason: {reason}")
+        time.sleep(.1)
+        print(line)
+
+    if bans:
+        say("Players banned:")
+        for player, reason, status in bans:
+            say(f"{player['text']} - Reason: {reason}" if reason else player['text'])
+    # Warnings (yellow card): announced in lobby chat, but the player is not kicked
+    for player, reason, status in warnings:
+        say(f"{player['text']} - WARNING: {reason}" if reason else f"{player['text']} - WARNING")
+    if not matches:
+        print("No banned or warned players found.")
 
     # Click on banned players
-    click_banned_players(banned_from_list)
+    click_banned_players(bans)
 
 
 # Debug: save what the script sees, so you can check the regions line up with the names
