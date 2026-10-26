@@ -55,6 +55,8 @@ OCR_INVERT = True
 OCR_CONFIG = '--psm 6'
 # Kick banned players automatically by clicking their slot (off: chat notification only)
 AUTO_KICK = False
+# Move this script's window onto your second monitor at start-up, so it doesn't cover the lobby
+CONSOLE_ON_SECOND_MONITOR = True
 # Type the "Download Wc3Banlist..." advert into lobby chat on every F3
 SHOW_ADVERT = False
 # ---------------------------------------------------------------------------
@@ -261,6 +263,33 @@ def handle_f4():
     print(f"Screen {SCREEN_W}x{SCREEN_H}, regions {REGIONS}")
     print("Names read:", [p['text'] for p in extract_players_with_positions()])
     print(f"Debug images saved to {debug_dir}")
+
+# Move the command prompt / terminal window to the first non-main monitor
+def move_console_to_second_monitor():
+    try:
+        import win32api, win32gui, win32con
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if not hwnd:
+            return
+        # In Windows Terminal the console window is hidden; its owner is the real terminal window
+        owner = ctypes.windll.user32.GetAncestor(hwnd, 3)  # GA_ROOTOWNER
+        if owner:
+            hwnd = owner
+        for monitor, _, _ in win32api.EnumDisplayMonitors():
+            info = win32api.GetMonitorInfo(monitor)
+            if info['Flags'] & 1:  # main monitor - skip
+                continue
+            left, top, right, bottom = info['Work']
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.MoveWindow(hwnd, left + 40, top + 40,
+                                min(1200, right - left - 80), min(700, bottom - top - 80), True)
+            return
+        print("Only one monitor found - window not moved.")
+    except Exception as e:
+        print(f"Couldn't move the window to the second monitor ({e}).")
+
+if CONSOLE_ON_SECOND_MONITOR:
+    move_console_to_second_monitor()
 
 # Add Hotkeys
 keyboard.add_hotkey("F3", handle_f3)
