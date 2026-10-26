@@ -209,14 +209,23 @@ def handle_exit():
     global running
     running = False
 
+# Coloured console output (works in Windows Terminal and Command Prompt)
+os.system('')
+RED, YELLOW, GREEN, GREY, BOLD, RESET = '\033[97;41m', '\033[30;43m', '\033[30;42m', '\033[90m', '\033[1m', '\033[0m'
+
+def banner(colour, text):
+    line = ' ' * 60
+    print(f"{colour}{line}{RESET}")
+    print(f"{colour}{BOLD}  {text:<58}{RESET}")
+    print(f"{colour}{line}{RESET}")
+
 # Run banlist
 def handle_f3():
     players_with_positions = extract_players_with_positions()
 
-    # Output players
-    print("Extracted Players:")
-    for player in players_with_positions:
-        print(player['text'])
+    # Output players (small and grey - the result below is what matters)
+    print()
+    print(f"{GREY}[{time.strftime('%H:%M:%S')}] Names read: {', '.join(p['text'] for p in players_with_positions) or '(none)'}{RESET}")
 
     if SHOW_ADVERT:
         keyboard.write("Download Wc3Banlist at: https://github.com/RealFutureAI/WC3Banlist")
@@ -232,7 +241,6 @@ def handle_f3():
         time.sleep(.1)
         keyboard.send('enter')
         time.sleep(.1)
-        print(line)
 
     if bans:
         say("Players banned:")
@@ -241,8 +249,14 @@ def handle_f3():
     # Warnings (yellow card): announced in lobby chat, but the player is not kicked
     for player, reason, status in warnings:
         say(f"{player['text']} - WARNING: {reason}" if reason else f"{player['text']} - WARNING")
+
+    # Result in the console - big and coloured
+    for player, reason, status in bans:
+        banner(RED, f"BANNED:  {player['text']}" + (f"  -  {reason}" if reason else ''))
+    for player, reason, status in warnings:
+        banner(YELLOW, f"WARNING: {player['text']}" + (f"  -  {reason}" if reason else ''))
     if not matches:
-        print("No banned or warned players found.")
+        banner(GREEN, "All clear - no banned or warned players")
 
     # Click on banned players (only if AUTO_KICK is on)
     if AUTO_KICK:
