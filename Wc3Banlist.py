@@ -45,6 +45,13 @@ BASE_BAN_CLICK_Y = 260
 # Fuzzy matching: only names at least this long are fuzzy-matched; shorter names must match exactly
 FUZZY_MIN_LENGTH = 5
 FUZZY_RATIO = 0.85
+# OCR tuning: enlarge the name areas before reading (bigger = clearer, slightly slower),
+# brightness cut-off for text (0-255), and dark-text-on-white (what Tesseract reads best)
+OCR_SCALE = 3
+OCR_THRESHOLD = 150
+OCR_INVERT = True
+# Tesseract page mode: 6 = a block of text lines (player list)
+OCR_CONFIG = '--psm 6'
 # Type the "Download Wc3Banlist..." advert into lobby chat on every F3
 SHOW_ADVERT = False
 # ---------------------------------------------------------------------------
@@ -135,13 +142,17 @@ def load_banlist():
 
 def preprocess_image(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    img_resized = cv2.resize(gray, None, fx=1.0, fy=1.0)
-    _, processed_img = cv2.threshold(img_resized, 150, 255, cv2.THRESH_BINARY)
+    img_resized = cv2.resize(gray, None, fx=OCR_SCALE, fy=OCR_SCALE, interpolation=cv2.INTER_CUBIC)
+    mode = cv2.THRESH_BINARY_INV if OCR_INVERT else cv2.THRESH_BINARY
+    _, processed_img = cv2.threshold(img_resized, OCR_THRESHOLD, 255, mode)
+    # white border helps Tesseract with text near the edges
+    processed_img = cv2.copyMakeBorder(processed_img, 10, 10, 10, 10, cv2.BORDER_CONSTANT,
+                                       value=255 if OCR_INVERT else 0)
     return processed_img
 
 def get_text_data(img):
     preprocessed_img = preprocess_image(img)
-    data = pytesseract.image_to_data(preprocessed_img, output_type=pytesseract.Output.DICT)
+    data = pytesseract.image_to_data(preprocessed_img, config=OCR_CONFIG, output_type=pytesseract.Output.DICT)
     return data
 
 def check_banned(players, banlist):
@@ -167,8 +178,9 @@ def extract_players_with_positions():
             if text_data['text'][i].strip():
                 players.append({
                     'text': text_data['text'][i],
-                    'x': text_data['left'][i] + coords[0],
-                    'y': text_data['top'][i] + coords[1]
+                    # convert from the enlarged image back to real screen pixels
+                    'x': int((text_data['left'][i] - 10) / OCR_SCALE) + coords[0],
+                    'y': int((text_data['top'][i] - 10) / OCR_SCALE) + coords[1]
                 })
     return players
 
