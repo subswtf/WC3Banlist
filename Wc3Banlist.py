@@ -247,7 +247,8 @@ def handle_f3():
 def handle_f4():
     debug_dir = os.path.join(SCRIPT_DIR, 'debug')
     os.makedirs(debug_dir, exist_ok=True)
-    full = cv2.cvtColor(grab_screen(), cv2.COLOR_RGB2BGR)
+    # main monitor only, so the boxes line up on multi-monitor setups
+    full = cv2.cvtColor(grab_screen((0, 0, SCREEN_W - 1, SCREEN_H - 1)), cv2.COLOR_RGB2BGR)
     for i, (a, b, c, d) in enumerate(REGIONS):
         cv2.rectangle(full, (a, b), (c, d), (0, 0, 255), 3)
         region = grab_screen((a, b, c, d))
