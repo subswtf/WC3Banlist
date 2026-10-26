@@ -53,6 +53,8 @@ OCR_THRESHOLD = 150
 OCR_INVERT = True
 # Tesseract page mode: 6 = a block of text lines (player list)
 OCR_CONFIG = '--psm 6'
+# Kick banned players automatically by clicking their slot (off: chat notification only)
+AUTO_KICK = False
 # Type the "Download Wc3Banlist..." advert into lobby chat on every F3
 SHOW_ADVERT = False
 # ---------------------------------------------------------------------------
@@ -240,8 +242,9 @@ def handle_f3():
     if not matches:
         print("No banned or warned players found.")
 
-    # Click on banned players
-    click_banned_players(bans)
+    # Click on banned players (only if AUTO_KICK is on)
+    if AUTO_KICK:
+        click_banned_players(bans)
 
 
 # Debug: save what the script sees, so you can check the regions line up with the names
