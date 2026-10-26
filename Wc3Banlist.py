@@ -9,6 +9,10 @@ import os
 import difflib
 import ctypes
 import sys
+import csv
+import io
+import re
+import urllib.request
 
 # Make the script DPI-aware so screen coordinates match real pixels at any Windows display scale
 try:
@@ -22,7 +26,11 @@ except Exception:
 # Tesseract OCR path - Set your Path to your tesseract.exe here like in the example
 pytesseract.pytesseract.tesseract_cmd = 'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
 
-# Path to the Excel file with the ban list - by default, banlist.xlsx next to this script
+# Google Sheet with the ban list (columns: name, reason). Paste the sheet's normal link here.
+# The sheet must be shared as "Anyone with the link - Viewer". Leave empty to use the Excel file only.
+GOOGLE_SHEET_URL = ''
+
+# Path to the Excel file with the ban list - used if GOOGLE_SHEET_URL is empty or the sheet can't be reached
 SCRIPT_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 banlist_path = os.path.join(SCRIPT_DIR, 'banlist.xlsx')
 
@@ -45,8 +53,44 @@ SCREEN_W, SCREEN_H = pyautogui.size()
 SX, SY = SCREEN_W / BASE_WIDTH, SCREEN_H / BASE_HEIGHT
 REGIONS = [(int(a * SX), int(b * SY), int(c * SX), int(d * SY)) for a, b, c, d in BASE_REGIONS]
 
-# Load Banlist from Excel file
+def add_row(banlist, row):
+    if not row or row[0] is None:
+        return
+    name = str(row[0]).strip().lower()
+    reason = str(row[1]).strip() if len(row) > 1 and row[1] is not None else ''
+    if name:
+        banlist[name] = reason
+
+# Load Banlist from the Google Sheet (as CSV)
+def load_banlist_from_sheet():
+    m = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', GOOGLE_SHEET_URL)
+    if not m:
+        print("GOOGLE_SHEET_URL doesn't look like a Google Sheets link.")
+        return None
+    gid = re.search(r'[#&?]gid=(\d+)', GOOGLE_SHEET_URL)
+    url = f"https://docs.google.com/spreadsheets/d/{m.group(1)}/export?format=csv&gid={gid.group(1) if gid else '0'}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            text = resp.read().decode('utf-8-sig')
+    except Exception as e:
+        print(f"Couldn't load the Google Sheet ({e}). Is it shared as 'Anyone with the link'?")
+        return None
+    if text.lstrip().lower().startswith('<!doctype html') or text.lstrip().startswith('<html'):
+        print("Google returned a sign-in page - share the sheet as 'Anyone with the link - Viewer'.")
+        return None
+    banlist = {}
+    for row in list(csv.reader(io.StringIO(text)))[1:]:
+        add_row(banlist, row)
+    print(f"Loaded {len(banlist)} names from the Google Sheet.")
+    return banlist
+
+# Load Banlist from the Google Sheet, or the Excel file as a fallback
 def load_banlist():
+    if GOOGLE_SHEET_URL:
+        banlist = load_banlist_from_sheet()
+        if banlist is not None:
+            return banlist
+        print("Falling back to the Excel file.")
     if not os.path.exists(banlist_path):
         print("Ban list file not found.")
         return {}
@@ -56,12 +100,7 @@ def load_banlist():
     banlist = {}
 
     for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or row[0] is None:
-            continue
-        name = str(row[0]).strip().lower()
-        reason = str(row[1]).strip() if len(row) > 1 and row[1] is not None else ''
-        if name:
-            banlist[name] = reason
+        add_row(banlist, row)
 
     return banlist
 
@@ -173,7 +212,7 @@ keyboard.add_hotkey("F6", handle_exit)
 # Variable to check if the program is running
 running = True
 
-print(f"Screen {SCREEN_W}x{SCREEN_H}, banlist: {banlist_path}")
+print(f"Screen {SCREEN_W}x{SCREEN_H}, banlist: {GOOGLE_SHEET_URL or banlist_path}")
 print("The Program runs in background. Press F3 to check banned, F4 for debug images, F6 to stop the program.")
 
 # check if hotkeys are pressed
