@@ -7,12 +7,43 @@ import keyboard
 import openpyxl
 import os
 import difflib
+import ctypes
+import sys
+
+# Make the script DPI-aware so screen coordinates match real pixels at any Windows display scale
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+except Exception:
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
 
 # Tesseract OCR path - Set your Path to your tesseract.exe here like in the example
 pytesseract.pytesseract.tesseract_cmd = 'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
 
-# Path to the Excel file with the ban list - Set your Path to your Excel Banlist here
-banlist_path = r'C:\Users\Alpha-Omega\Desktop\Cloudspeicher\Privat\Zocken\Banlist\banlist.xlsx'
+# Path to the Excel file with the ban list - by default, banlist.xlsx next to this script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+banlist_path = os.path.join(SCRIPT_DIR, 'banlist.xlsx')
+
+# ---- Settings -------------------------------------------------------------
+# Screen regions (x1, y1, x2, y2) were made for a 3840x2160 (4K) screen. They are scaled
+# automatically to your screen size. If names aren't found, press F4 and check the debug images.
+BASE_WIDTH, BASE_HEIGHT = 3840, 2160
+BASE_REGIONS = [(400, 520, 850, 900), (1700, 520, 2150, 900)]
+# Click offsets (4K values, also scaled): click on the name, then on "Ban" in the menu below it
+BASE_NAME_CLICK = (40, 15)
+BASE_BAN_CLICK_Y = 260
+# Fuzzy matching: only names at least this long are fuzzy-matched; shorter names must match exactly
+FUZZY_MIN_LENGTH = 5
+FUZZY_RATIO = 0.85
+# Type the "Download Wc3Banlist..." advert into lobby chat on every F3
+SHOW_ADVERT = False
+# ---------------------------------------------------------------------------
+
+SCREEN_W, SCREEN_H = pyautogui.size()
+SX, SY = SCREEN_W / BASE_WIDTH, SCREEN_H / BASE_HEIGHT
+REGIONS = [(int(a * SX), int(b * SY), int(c * SX), int(d * SY)) for a, b, c, d in BASE_REGIONS]
 
 # Load Banlist from Excel file
 def load_banlist():
@@ -25,8 +56,10 @@ def load_banlist():
     banlist = {}
 
     for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or row[0] is None:
+            continue
         name = str(row[0]).strip().lower()
-        reason = str(row[1]).strip()
+        reason = str(row[1]).strip() if len(row) > 1 and row[1] is not None else ''
         if name:
             banlist[name] = reason
 
@@ -48,14 +81,17 @@ def check_banned(players, banlist):
     for player in players:
         player_lower = player['text'].lower()
         for banned_player in banlist:
-            if player_lower == banned_player or difflib.SequenceMatcher(None, player_lower, banned_player).ratio() > 0.8:
+            exact = player_lower == banned_player
+            fuzzy = (len(player_lower) >= FUZZY_MIN_LENGTH and len(banned_player) >= FUZZY_MIN_LENGTH
+                     and difflib.SequenceMatcher(None, player_lower, banned_player).ratio() >= FUZZY_RATIO)
+            if exact or fuzzy:
                 banned_players.append((player, banlist[banned_player]))
                 break
     return banned_players
 
 def extract_players_with_positions():
     players = []
-    for coords in [(400, 520, 850, 900), (1700, 520, 2150, 900)]:
+    for coords in REGIONS:
         frame = grab_screen(coords)
         text_data = get_text_data(frame)
         for i in range(len(text_data['text'])):
@@ -70,12 +106,12 @@ def extract_players_with_positions():
 def click_banned_players(banned_players):
     for player, reason in banned_players:
         x, y = player['x'], player['y']
-        x_right = x + 40
-        y_below = y + 15
+        x_right = x + int(BASE_NAME_CLICK[0] * SX)
+        y_below = y + int(BASE_NAME_CLICK[1] * SY)
         pyautogui.moveTo(x_right, y_below)
         pyautogui.click()
         time.sleep(1)
-        y_below_second_click = y + 260
+        y_below_second_click = y + int(BASE_BAN_CLICK_Y * SY)
         pyautogui.moveTo(x_right, y_below_second_click)
         pyautogui.click()
         time.sleep(0.5)
@@ -94,10 +130,11 @@ def handle_f3():
     for player in players_with_positions:
         print(player['text'])
 
-    keyboard.write("Download Wc3Banlist at: https://github.com/RealFutureAI/WC3Banlist")
-    time.sleep(.1)
-    keyboard.send('enter')
-    time.sleep(.1)
+    if SHOW_ADVERT:
+        keyboard.write("Download Wc3Banlist at: https://github.com/RealFutureAI/WC3Banlist")
+        time.sleep(.1)
+        keyboard.send('enter')
+        time.sleep(.1)
     keyboard.write("Players banned:")
     time.sleep(.1)
     keyboard.send('enter')
@@ -114,14 +151,30 @@ def handle_f3():
     click_banned_players(banned_from_list)
 
 
+# Debug: save what the script sees, so you can check the regions line up with the names
+def handle_f4():
+    debug_dir = os.path.join(SCRIPT_DIR, 'debug')
+    os.makedirs(debug_dir, exist_ok=True)
+    full = cv2.cvtColor(grab_screen(), cv2.COLOR_RGB2BGR)
+    for i, (a, b, c, d) in enumerate(REGIONS):
+        cv2.rectangle(full, (a, b), (c, d), (0, 0, 255), 3)
+        region = grab_screen((a, b, c, d))
+        cv2.imwrite(os.path.join(debug_dir, f'region_{i + 1}_ocr_input.png'), preprocess_image(region))
+    cv2.imwrite(os.path.join(debug_dir, 'screen_with_regions.png'), full)
+    print(f"Screen {SCREEN_W}x{SCREEN_H}, regions {REGIONS}")
+    print("Names read:", [p['text'] for p in extract_players_with_positions()])
+    print(f"Debug images saved to {debug_dir}")
+
 # Add Hotkeys
 keyboard.add_hotkey("F3", handle_f3)
+keyboard.add_hotkey("F4", handle_f4)
 keyboard.add_hotkey("F6", handle_exit)
 
 # Variable to check if the program is running
 running = True
 
-print("The Program runs in background. Press F3 to check banned or F6 stop the program.")
+print(f"Screen {SCREEN_W}x{SCREEN_H}, banlist: {banlist_path}")
+print("The Program runs in background. Press F3 to check banned, F4 for debug images, F6 to stop the program.")
 
 # check if hotkeys are pressed
 while running:

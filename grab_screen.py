@@ -27,7 +27,7 @@ def grab_screen(region=None):
     memdc.BitBlt((0, 0), (width, height), srcdc, (left, top), win32con.SRCCOPY)
     
     signedIntsArray = bmp.GetBitmapBits(True)
-    img = np.fromstring(signedIntsArray, dtype='uint8')
+    img = np.frombuffer(signedIntsArray, dtype='uint8').copy()
     img.shape = (height,width,4)
 
     srcdc.DeleteDC()
@@ -35,4 +35,4 @@ def grab_screen(region=None):
     win32gui.ReleaseDC(hwin, hwindc)
     win32gui.DeleteObject(bmp.GetHandle())
 
-    return cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
+    return cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
