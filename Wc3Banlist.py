@@ -38,7 +38,8 @@ banlist_path = os.path.join(SCRIPT_DIR, 'banlist.xlsx')
 # Screen regions (x1, y1, x2, y2) were made for a 3840x2160 (4K) screen. They are scaled
 # automatically to your screen size. If names aren't found, press F4 and check the debug images.
 BASE_WIDTH, BASE_HEIGHT = 3840, 2160
-BASE_REGIONS = [(400, 520, 850, 900), (1700, 520, 2150, 900)]
+# Tuned for a 3v3 lobby (3 rows per team), measured at 2560x1440 and stored in 4K units
+BASE_REGIONS = [(375, 525, 849, 750), (1665, 525, 2150, 750)]
 # Click offsets (4K values, also scaled): click on the name, then on "Ban" in the menu below it
 BASE_NAME_CLICK = (40, 15)
 BASE_BAN_CLICK_Y = 260
